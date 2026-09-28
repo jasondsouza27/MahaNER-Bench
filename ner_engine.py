@@ -199,7 +199,7 @@ KNOWN_BASE_ENTITIES = {
     # LOC - World Countries & Cities
     "अमेरिका", "कॅनडा", "रशिया", "चीन", "जपान", "ब्रिटन", "इंग्लंड", "फ्रान्स",
     "जर्मनी", "ऑस्ट्रेलिया", "नेपाळ", "भूतान", "बांगलादेश", "पाकिस्तान", "श्रीलंका",
-    "दुबई", "लंडन", "पॅरिस", "न्यूयॉर्क", "कॅलिफोर्निया",
+    "दुबई", "लंडन", "पॅरिस", "न्यूयॉर्क", "कॅलिफोर्निया", "अर्जेंटिना", "रोसारियो", "मियामी", "दोहा", "कतार", "ब्राझील",
     # PER - Historic Leaders & Iconic Figures
     "छत्रपती शिवाजी महाराज", "शिवाजी महाराज", "छत्रपती संभाजी महाराज", "संभाजी महाराज",
     "महात्मा ज्योतिराव फुले", "ज्योतिराव फुले", "सावित्रीबाई फुले", "डॉ. बाबासाहेब आंबेडकर",
@@ -216,15 +216,17 @@ KNOWN_BASE_ENTITIES = {
     "सचिन तेंडुलकर", "तेंडुलकर", "विराट कोहली", "कोहली", "रोहित शर्मा",
     "महेंद्रसिंग धोनी", "धोनी", "लता मंगेशकर", "लता", "आशा भोसले",
     "अनुष्का शर्मा", "प्रियांका चोप्रा", "कल्पना चावला", "आलिया भट्ट",
+    "लिओनेल मेस्सी", "मेस्सी", "ख्रिस्तियानो रोनाल्डो", "रोनाल्डो", "नेमार",
     # Surnames ending in 'ा' protected from truncation
     "शर्मा", "वर्मा", "गुप्ता", "मेहता", "मिश्रा", "शुक्ला", "चोप्रा", "राणा",
     "भाटिया", "खन्ना", "चावला",
-    # ORG - Agencies, Corporations, Institutions
+    # ORG - Agencies, Corporations, Institutions, Clubs
     "भारतीय अंतराळ संशोधन संस्था", "इस्रो", "ISRO", "नासा", "NASA", "टाटा मोटर्स",
     "टाटा", "रिलायन्स", "रिझर्व्ह बँक ऑफ इंडिया", "RBI", "बीसीसीआय", "BCCI",
     "पुणे विद्यापीठ", "मुंबई विद्यापीठ", "मंत्रालय", "विधानसभा", "संसद", "उच्च न्यायालय",
     "सर्वोच्च न्यायालय", "एसटी महामंडळ", "काँग्रेस", "भाजप", "शिवसेना",
     "राष्ट्रवादी काँग्रेस", "आप", "बाटा", "नोकिया",
+    "बार्सिलोना", "पॅरिस सेंट-जर्मेन", "सेंट-जर्मेन", "इंटर मियामी", "फिफा", "युफा",
     # MISC - Projects, Missions, Events
     "हिंदवी स्वराज्य", "चांद्रयान", "चांद्रयान मोहीम", "मंगळयान", "मेट्रो मार्ग",
     "मेट्रो", "ऑलिम्पिक", "महाराष्ट्र दिन", "स्वातंत्र्य दिन", "गणेशोत्सव", "दिवाळी",
@@ -364,6 +366,23 @@ KNOWN_CANONICAL_MAP: Dict[str, Tuple[str, str, str]] = {
     "रोहित शर्मा": ("रोहित शर्मा", "", "प्रथमा (Nominative / Base)"),
     "शर्माने": ("शर्मा", "ने", "तृतीया (Instrumental / Ergative)"),
     "शर्मा": ("शर्मा", "", "प्रथमा (Nominative / Base)"),
+    "लिओनेल मेस्सी": ("लिओनेल मेस्सी", "", "प्रथमा (Nominative / Base)"),
+    "मेस्सीने": ("मेस्सी", "ने", "तृतीया (Instrumental / Ergative)"),
+    "मेस्सीचा": ("मेस्सी", "चा", "षष्ठी (Genitive)"),
+    "मेस्सीची": ("मेस्सी", "ची", "षष्ठी (Genitive)"),
+    "मेस्सीचे": ("मेस्सी", "चे", "षष्ठी (Genitive)"),
+    "मेस्सी": ("मेस्सी", "", "प्रथमा (Nominative / Base)"),
+    "अर्जेंटिनाचा": ("अर्जेंटिना", "चा", "षष्ठी (Genitive)"),
+    "अर्जेंटिनामधील": ("अर्जेंटिना", "मधील", "सप्तमी / संबंधवाचक (Locative)"),
+    "अर्जेंटिनाचे": ("अर्जेंटिना", "चे", "षष्ठी (Genitive)"),
+    "अर्जेंटिनाची": ("अर्जेंटिना", "ची", "षष्ठी (Genitive)"),
+    "अर्जेंटिनात": ("अर्जेंटिना", "त", "सप्तमी (Locative)"),
+    "अर्जेंटिना": ("अर्जेंटिना", "", "प्रथमा (Nominative / Base)"),
+    "रोसारियो": ("रोसारियो", "", "प्रथमा (Nominative / Base)"),
+    "बार्सिलोना": ("बार्सिलोना", "", "प्रथमा (Nominative / Base)"),
+    "पॅरिस सेंट-जर्मेन": ("पॅरिस सेंट-जर्मेन", "", "प्रथमा (Nominative / Base)"),
+    "इंटर मियामी": ("इंटर मियामी", "", "प्रथमा (Nominative / Base)"),
+    "फिफा": ("फिफा", "", "प्रथमा (Nominative / Base)"),
     # ORG
     "इस्रोने": ("इस्रो", "ने", "तृतीया (Instrumental / Ergative)"),
     "इस्रोला": ("इस्रो", "ला", "द्वितीया / चतुर्थी (Dative)"),
@@ -641,7 +660,17 @@ def canonicalize_marathi_entity(surface: str, tag: Optional[str] = None) -> Tupl
     return base, (suff if suff else ""), case_lbl
 
 
-# ─── BIO & Subword Aggregator with Canonicalization ──────────────────────────────
+_WORD_DELIMITERS = set(".,;!?।\":()[]«»' \t\n\r")
+
+
+def expand_to_word_boundaries(s: int, e: int, text: str) -> Tuple[int, int]:
+    """Expands character offsets to complete lexical word boundaries, respecting punctuation."""
+    while s > 0 and text[s - 1] not in _WORD_DELIMITERS:
+        s -= 1
+    while e < len(text) and text[e] not in _WORD_DELIMITERS and text[e] != "-":
+        e += 1
+    return s, e
+
 
 def aggregate_subwords_and_bio(
     raw_predictions: List[Dict[str, Any]],
@@ -649,14 +678,16 @@ def aggregate_subwords_and_bio(
 ) -> List[Dict[str, Any]]:
     """
     Reconstructs continuous Devanagari multi-word entity spans from Hugging Face pipeline output.
-    Uses exact character boundary slicing from original_text to preserve Devanagari ligatures
-    without breaking conjuncts, extends boundaries if postpositions were un-tagged, and
-    canonicalizes each entity to extract base form and suffix.
+    Ensures that entities are snapped to full lexical word boundaries so subword tokenization
+    never cuts foreign transliterations (e.g. रोसारियो, बार्सिलोना, पॅरिस सेंट-जर्मेन) into
+    single-letter fragments.
+    Enforces grammatical case boundary isolation so inflected constituents (e.g. अर्जेंटिनामधील)
+    do not swallow adjacent distinct entities (e.g. रोसारियो).
     """
     if not raw_predictions:
         return []
 
-    # 1. Standardize and filter valid entities
+    # 1. Standardize, filter valid entities, and expand to word boundaries
     valid_chunks = []
     for item in raw_predictions:
         raw_entity = item.get("entity_group") or item.get("entity") or ""
@@ -681,44 +712,79 @@ def aggregate_subwords_and_bio(
             else:
                 continue
 
-        # Subword boundary repair: if chunk starts with '##' or a dependent vowel sign/virama/anusvara,
-        # it is an attached suffix of the previous word. Advance start past that trailing syllable to the next full word.
-        dev_dep_signs = set(chr(cp) for cp in range(0x093E, 0x0950)) | {'\u0902', '\u0903'}
-        if word.startswith("##") or (start < len(original_text) and original_text[start] in dev_dep_signs):
-            while start < end and not original_text[start].isspace():
-                start += 1
-            while start < end and original_text[start].isspace():
-                start += 1
-
-        if start >= end:
+        # Snap to full word boundaries
+        s_word, e_word = expand_to_word_boundaries(start, end, original_text)
+        w = original_text[s_word:e_word].strip()
+        if not w:
             continue
+
+        # Context-aware tag refinement for international clubs, personalities & locations
+        if w in ("बार्सिलोना", "पॅरिस सेंट-जर्मेन", "सेंट-जर्मेन", "इंटर मियामी", "फिफा", "युफा"):
+            norm_tag = "ORG"
+        elif w in ("मेस्सी", "मेस्सीने", "लिओनेल मेस्सी", "रोनाल्डो", "नेमार"):
+            norm_tag = "PER"
+        elif w in ("रोसारियो", "पॅरिस", "मियामी", "दोहा", "कतार", "अर्जेंटिना", "अर्जेंटिनाचा", "अर्जेंटिनामधील"):
+            norm_tag = "LOC"
 
         valid_chunks.append({
             "tag": norm_tag,
-            "start": start,
-            "end": end,
+            "start": s_word,
+            "end": e_word,
             "scores": [score]
         })
 
     if not valid_chunks:
         return []
 
-    # Sort chunks by start position
-    valid_chunks.sort(key=lambda x: x["start"])
+    # Sort chunks by start position, longer first
+    valid_chunks.sort(key=lambda x: (x["start"], -x["end"]))
 
-    # 2. Merge overlapping or immediately adjacent tokens of the same tag
+    # 2. Merge overlapping or immediately adjacent tokens with grammatical case isolation
     merged = []
     curr = valid_chunks[0]
 
     for nxt in valid_chunks[1:]:
         gap = original_text[curr["end"]:nxt["start"]]
+
+        # a) Overlapping or identical span: take longer
+        if nxt["start"] <= curr["end"]:
+            curr["end"] = max(curr["end"], nxt["end"])
+            curr["scores"].extend(nxt["scores"])
+            if nxt["tag"] != curr["tag"] and max(nxt["scores"]) > max(curr["scores"]):
+                curr["tag"] = nxt["tag"]
+            continue
+
+        # b) Hyphen-connected compound: e.g. सेंट + - + जर्मेन -> सेंट-जर्मेन
+        if gap == "-" or gap.strip() == "-":
+            curr["end"] = nxt["end"]
+            curr["scores"].extend(nxt["scores"])
+            curr["tag"] = nxt["tag"]
+            continue
+
+        # c) Known multi-word compound: e.g. पॅरिस सेंट-जर्मेन, इंटर मियामी
+        combined = original_text[curr["start"]:nxt["end"]].strip()
+        if combined in ("पॅरिस सेंट-जर्मेन", "इंटर मियामी", "लिओनेल मेस्सी", "छत्रपती शिवाजी महाराज", "वानखेडे स्टेडियम"):
+            curr["end"] = nxt["end"]
+            curr["scores"].extend(nxt["scores"])
+            if "जर्मेन" in combined or "मियामी" in combined:
+                curr["tag"] = "ORG"
+            continue
+
+        # d) Grammatical Case Isolation:
+        # If curr already ends in a case postposition (e.g. अर्जेंटिनामधील or मेस्सीने),
+        # it is a grammatically closed constituent and CANNOT merge with nxt!
+        curr_surface = original_text[curr["start"]:curr["end"]].strip()
+        _, curr_suff, _ = canonicalize_marathi_entity(curr_surface, curr["tag"])
+
         can_merge = (
             nxt["tag"] == curr["tag"] and
-            (nxt["start"] <= curr["end"] or (len(gap.strip()) == 0 and len(gap) <= 2))
+            not curr_suff and
+            len(gap.strip()) == 0 and
+            len(gap) <= 2
         )
 
         if can_merge:
-            curr["end"] = max(curr["end"], nxt["end"])
+            curr["end"] = nxt["end"]
             curr["scores"].extend(nxt["scores"])
         else:
             merged.append(curr)
@@ -1357,6 +1423,17 @@ def compute_cooccurrence(text: str, entities: List[Dict[str, Any]]) -> Dict[str,
 _WIKIDATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
+ENTITY_TRANSLATION_MAP = {
+    "मेस्सी": "Lionel Messi",
+    "रोनाल्डो": "Cristiano Ronaldo",
+    "इंटर मियामी": "Inter Miami CF",
+    "पॅरिस सेंट-जर्मेन": "Paris Saint-Germain F.C.",
+    "बार्सिलोना": "FC Barcelona",
+    "रोसारियो": "Rosario, Santa Fe",
+    "फिफा": "FIFA",
+}
+
+
 def lookup_wikidata_entities(
     entities: List[Dict[str, Any]], language: str = "mr"
 ) -> List[Dict[str, Any]]:
@@ -1413,8 +1490,11 @@ def lookup_wikidata_entities(
             "match_status": "❌ Not Found",
         }
 
-        # Candidate search terms (e.g. canonical, and if multi-word without honorifics)
-        search_candidates = [canonical]
+        # Candidate search terms (e.g. translation mapping, canonical, and title-stripped forms)
+        search_candidates = []
+        if canonical in ENTITY_TRANSLATION_MAP:
+            search_candidates.append(ENTITY_TRANSLATION_MAP[canonical])
+        search_candidates.append(canonical)
         words = canonical.split()
         if len(words) > 1 and words[0] in PERSON_TITLE_PREFIXES:
             search_candidates.append(" ".join(words[1:]))
