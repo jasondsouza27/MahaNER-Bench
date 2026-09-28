@@ -29,7 +29,10 @@ from ner_engine import (
     extract_entities,
     extract_entities_with_model,
     compute_multi_model_comparison,
-    render_annotated_html
+    render_annotated_html,
+    compute_entity_frequency,
+    compute_cooccurrence,
+    lookup_wikidata_entities,
 )
 
 # Setup logging
@@ -205,11 +208,14 @@ def render_single_model_mode(selected_model: str, conf_threshold: int, show_cano
         c5.metric("सरासरी विश्वास (Confidence)", f"{avg_conf:.1f}%", icon=":material/verified:")
 
         # Sub-tabs
-        tab_hl, tab_tbl, tab_chart, tab_export = st.tabs([
+        tab_hl, tab_tbl, tab_chart, tab_freq, tab_network, tab_linking, tab_export = st.tabs([
             ":material/palette: दृश्य हायलाइट्स (Highlights)",
             ":material/table_chart: तपशीलवार तक्ता (Table)",
             ":material/bar_chart: आलेख व विश्लेषण (Analytics)",
-            ":material/download: डेटा निर्यात (Export)"
+            ":material/leaderboard: घटक वारंवारता (Entity Frequency)",
+            ":material/hub: सह-उपस्थिती जाळे (Co-occurrence Network)",
+            ":material/link: विकिडेटा लिंकिंग (Entity Linking)",
+            ":material/download: डेटा निर्यात (Export)",
         ])
 
         # ── Tab 1: Highlights ──
@@ -364,7 +370,309 @@ def render_single_model_mode(selected_model: str, conf_threshold: int, show_cano
             else:
                 st.info("विश्लेषणासाठी डेटा उपलब्ध नाही.")
 
-        # ── Tab 4: Export ──
+        # ── Tab 4: Entity Frequency Dashboard ──
+        with tab_freq:
+            if filtered:
+                freq_data = compute_entity_frequency(filtered)
+
+                # Summary metrics
+                fc1, fc2 = st.columns(2)
+                fc1.metric("एकूण घटक (Total Mentions)", freq_data["total_entities"], icon=":material/format_list_numbered:")
+                fc2.metric("अनन्य घटक (Unique Entities)", freq_data["unique_entities"], icon=":material/fingerprint:")
+
+                st.write("")
+
+                col_leader, col_treemap = st.columns([1, 1])
+
+                # Leaderboard bar chart
+                with col_leader:
+                    st.markdown("##### :material/leaderboard: घटक वारंवारता क्रमवारी (Entity Frequency Leaderboard)")
+                    if freq_data["freq_table"]:
+                        leader_rows = []
+                        color_map_freq = {}
+                        for item in freq_data["freq_table"][:15]:
+                            label = item["canonical_entity"]
+                            leader_rows.append({
+                                "Entity": label,
+                                "Mentions": item["count"],
+                                "Tag": item["tag"],
+                            })
+                            cfg = ENTITY_CONFIG.get(item["tag"], ENTITY_CONFIG.get("MISC", {}))
+                            color_map_freq[label] = cfg.get("border_color", "#9333EA")
+
+                        df_leader = pd.DataFrame(leader_rows)
+                        if HAS_PLOTLY:
+                            fig_freq = px.bar(
+                                df_leader, x="Mentions", y="Entity",
+                                color="Entity", color_discrete_map=color_map_freq,
+                                text="Mentions", orientation="h",
+                            )
+                            fig_freq.update_layout(
+                                showlegend=False,
+                                margin=dict(t=10, b=20, l=20, r=20),
+                                height=max(280, len(leader_rows) * 38),
+                                yaxis=dict(autorange="reversed"),
+                                xaxis_title="उल्लेख संख्या (Mentions)",
+                                yaxis_title="",
+                            )
+                            fig_freq.update_traces(textposition="outside")
+                            st.plotly_chart(fig_freq, use_container_width=True)
+                        else:
+                            st.bar_chart(df_leader.set_index("Entity")["Mentions"])
+
+                # Treemap by category
+                with col_treemap:
+                    st.markdown("##### :material/grid_view: प्रवर्गानुसार ट्रीमॅप (Category Treemap)")
+                    if HAS_PLOTLY and freq_data["freq_table"]:
+                        tree_rows = []
+                        for item in freq_data["freq_table"]:
+                            cfg = ENTITY_CONFIG.get(item["tag"], ENTITY_CONFIG.get("MISC", {}))
+                            tree_rows.append({
+                                "entity": item["canonical_entity"],
+                                "category": f"{cfg.get('marathi', item['tag'])} ({item['tag']})",
+                                "count": item["count"],
+                            })
+                        df_tree = pd.DataFrame(tree_rows)
+                        fig_tree = px.treemap(
+                            df_tree, path=["category", "entity"], values="count",
+                            color="category",
+                            color_discrete_map={
+                                f"{ENTITY_CONFIG[t]['marathi']} ({t})": ENTITY_CONFIG[t]["border_color"]
+                                for t in ENTITY_CONFIG
+                            },
+                        )
+                        fig_tree.update_layout(
+                            margin=dict(t=10, b=10, l=10, r=10),
+                            height=max(280, len(freq_data["freq_table"]) * 28),
+                        )
+                        fig_tree.update_traces(
+                            textinfo="label+value",
+                            textfont_size=13,
+                        )
+                        st.plotly_chart(fig_tree, use_container_width=True)
+                    elif freq_data["freq_table"]:
+                        st.dataframe(
+                            pd.DataFrame(freq_data["freq_table"])[
+                                ["canonical_entity", "count", "tag", "category"]
+                            ],
+                            use_container_width=True, hide_index=True,
+                        )
+
+                # Surface form variants table
+                st.markdown("##### :material/swap_horiz: मूळ रूप ↔ विविध रूपे (Canonical ↔ Surface Variants)")
+                variant_rows = []
+                for item in freq_data["freq_table"]:
+                    variant_rows.append({
+                        "प्रमाणित घटक (Canonical)": item["canonical_entity"],
+                        "प्रवर्ग (Tag)": item["tag"],
+                        "उल्लेख (Mentions)": item["count"],
+                        "विविध रूपे (Surface Forms)": ", ".join(item["surface_forms"]),
+                    })
+                st.dataframe(pd.DataFrame(variant_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("वारंवारता विश्लेषणासाठी कोणतेही घटक उपलब्ध नाहीत.")
+
+        # ── Tab 5: Co-occurrence Network ──
+        with tab_network:
+            if filtered and len(filtered) >= 2:
+                cooccur = compute_cooccurrence(text, filtered)
+
+                if cooccur["edges"]:
+                    st.markdown("##### :material/hub: घटक सह-उपस्थिती जाळे (Entity Co-occurrence Network)")
+                    st.caption("एकाच वाक्यात एकत्र आढळणारे घटक जोडलेले दिसतात. रेषेची जाडी सह-उपस्थितीच्या संख्येवर अवलंबून आहे.")
+
+                    col_graph, col_matrix = st.columns([3, 2])
+
+                    # Interactive network graph using Plotly
+                    with col_graph:
+                        import math
+
+                        nodes = cooccur["nodes"]
+                        edges = cooccur["edges"]
+                        node_tags = cooccur["node_tags"]
+                        n = len(nodes)
+
+                        # Circular layout
+                        positions = {}
+                        for i, node in enumerate(nodes):
+                            angle = 2 * math.pi * i / n
+                            positions[node] = (math.cos(angle), math.sin(angle))
+
+                        if HAS_PLOTLY:
+                            # Edge traces
+                            edge_traces = []
+                            for edge in edges:
+                                x0, y0 = positions[edge["source"]]
+                                x1, y1 = positions[edge["target"]]
+                                w = edge["weight"]
+                                edge_traces.append(go.Scatter(
+                                    x=[x0, x1, None], y=[y0, y1, None],
+                                    mode="lines",
+                                    line=dict(width=max(1.5, w * 2.5), color="rgba(150, 150, 150, 0.5)"),
+                                    hoverinfo="none",
+                                    showlegend=False,
+                                ))
+
+                            # Node trace
+                            node_x = [positions[n][0] for n in nodes]
+                            node_y = [positions[n][1] for n in nodes]
+                            node_colors = [
+                                ENTITY_CONFIG.get(node_tags.get(n, "MISC"), ENTITY_CONFIG.get("MISC", {})).get("border_color", "#9333EA")
+                                for n in nodes
+                            ]
+                            node_trace = go.Scatter(
+                                x=node_x, y=node_y,
+                                mode="markers+text",
+                                text=nodes,
+                                textposition="top center",
+                                textfont=dict(size=11, family="Mukta, Noto Sans Devanagari, sans-serif"),
+                                marker=dict(
+                                    size=22,
+                                    color=node_colors,
+                                    line=dict(width=2, color="white"),
+                                ),
+                                hovertext=[
+                                    f"{n}<br>Tag: {node_tags.get(n, '?')}"
+                                    for n in nodes
+                                ],
+                                hoverinfo="text",
+                                showlegend=False,
+                            )
+
+                            fig_net = go.Figure(data=edge_traces + [node_trace])
+                            fig_net.update_layout(
+                                margin=dict(t=10, b=10, l=10, r=10),
+                                height=420,
+                                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                paper_bgcolor="rgba(0,0,0,0)",
+                            )
+                            st.plotly_chart(fig_net, use_container_width=True)
+                        else:
+                            st.info("Plotly आवश्यक आहे — हीटमॅप खाली उपलब्ध आहे.")
+
+                    # Co-occurrence heatmap matrix
+                    with col_matrix:
+                        st.markdown("###### :material/grid_on: सह-उपस्थिती मॅट्रिक्स (Co-occurrence Matrix)")
+                        if HAS_PLOTLY and len(nodes) >= 2:
+                            fig_co = px.imshow(
+                                cooccur["matrix"],
+                                x=nodes, y=nodes,
+                                text_auto=True,
+                                color_continuous_scale="YlOrRd",
+                                aspect="auto",
+                            )
+                            fig_co.update_layout(
+                                margin=dict(t=10, b=20, l=20, r=10),
+                                height=420,
+                                coloraxis_showscale=False,
+                            )
+                            st.plotly_chart(fig_co, use_container_width=True)
+                        else:
+                            df_co = pd.DataFrame(cooccur["matrix"], index=nodes, columns=nodes)
+                            st.dataframe(df_co, use_container_width=True)
+
+                    # Edge list table
+                    if edges:
+                        st.markdown("###### :material/link: सह-उपस्थिती जोड्या (Co-occurrence Pairs)")
+                        edge_rows = [{
+                            "घटक १ (Entity 1)": e["source"],
+                            "घटक २ (Entity 2)": e["target"],
+                            "सह-उपस्थिती (Co-occurrences)": e["weight"],
+                        } for e in edges]
+                        st.dataframe(pd.DataFrame(edge_rows), use_container_width=True, hide_index=True)
+
+                elif len(set(e.get("canonical_entity", "") for e in filtered)) < 2:
+                    st.info("सह-उपस्थिती जाळ्यासाठी किमान २ वेगवेगळे घटक आवश्यक आहेत.")
+                else:
+                    st.info("या मजकुरात एकाच वाक्यात एकत्र आढळणारे घटक नाहीत.")
+            else:
+                st.info("सह-उपस्थिती विश्लेषणासाठी किमान २ घटक आवश्यक आहेत.")
+
+        # ── Tab 6: Wikidata Entity Linking ──
+        with tab_linking:
+            if filtered:
+                st.markdown("##### :material/link: विकिडेटा घटक लिंकिंग (Wikidata Entity Linking)")
+                st.caption(
+                    "प्रत्येक ओळखलेल्या घटकाला Wikidata QID आणि Wikipedia लेखाशी जोडले जाते. "
+                    "प्रथम मराठी विकिपीडियात शोधले जाते, नंतर इंग्रजीत."
+                )
+
+                with st.spinner("Wikidata API शी जोडत आहे (Querying Wikidata)…"):
+                    linked_entities = lookup_wikidata_entities(filtered)
+
+                if linked_entities:
+                    # Summary metrics
+                    linked_count = sum(1 for le in linked_entities if le["wikidata_id"])
+                    total_count = len(linked_entities)
+
+                    lm1, lm2, lm3 = st.columns(3)
+                    lm1.metric("एकूण अनन्य घटक (Unique Entities)", total_count, icon=":material/fingerprint:")
+                    lm2.metric("यशस्वी लिंक (Linked)", linked_count, icon=":material/check_circle:")
+                    lm3.metric("लिंकिंग दर (Link Rate)", f"{(linked_count / total_count * 100) if total_count else 0:.0f}%", icon=":material/percent:")
+
+                    st.write("")
+
+                    # Entity cards
+                    for le in linked_entities:
+                        tag = le.get("tag", "MISC")
+                        cfg = ENTITY_CONFIG.get(tag, ENTITY_CONFIG.get("MISC", {}))
+                        b_col = cfg.get("border_color", "#9333EA")
+                        bg_c = cfg.get("bg_color", "rgba(147, 51, 234, 0.16)")
+                        icon = cfg.get("icon", "")
+                        m_lbl = cfg.get("marathi", tag)
+
+                        qid = le.get("wikidata_id", "")
+                        desc = le.get("wikidata_description", "") or "—"
+                        wiki_url = le.get("wikipedia_url", "")
+                        wd_url = le.get("wikidata_url", "")
+                        status = le.get("match_status", "")
+
+                        # Build links
+                        links_html = ""
+                        if wiki_url:
+                            links_html += f'<a href="{wiki_url}" target="_blank" style="color:{b_col}; text-decoration:none; font-size:0.82rem; margin-right:12px;">📖 Wikipedia</a>'
+                        if wd_url:
+                            links_html += f'<a href="{wd_url}" target="_blank" style="color:{b_col}; text-decoration:none; font-size:0.82rem;">🔗 Wikidata ({qid})</a>'
+
+                        card_html = (
+                            f'<div style="background:{bg_c}; border:1px solid {b_col}; border-radius:10px; '
+                            f'padding:12px 16px; margin-bottom:8px;">'
+                            f'<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">'
+                            f'<div style="display:flex; align-items:center; gap:8px;">'
+                            f'<span>{icon}</span>'
+                            f'<strong style="font-size:1.05rem;">{le["canonical_entity"]}</strong>'
+                            f'<span style="background:{cfg.get("badge_bg", b_col)}; color:#FFF; font-size:0.72rem; '
+                            f'font-weight:700; padding:2px 7px; border-radius:6px;">{m_lbl}</span>'
+                            f'</div>'
+                            f'<span style="font-size:0.8rem;">{status}</span>'
+                            f'</div>'
+                            f'<div style="font-size:0.88rem; margin-top:6px; opacity:0.9;">{desc}</div>'
+                            f'<div style="margin-top:6px;">{links_html}</div>'
+                            f'</div>'
+                        )
+                        st.markdown(card_html, unsafe_allow_html=True)
+
+                    # Summary table
+                    with st.expander("तपशीलवार तक्ता (Detailed Linking Table)"):
+                        link_rows = []
+                        for le in linked_entities:
+                            link_rows.append({
+                                "घटक (Entity)": le["canonical_entity"],
+                                "टॅग (Tag)": le["tag"],
+                                "QID": le.get("wikidata_id") or "—",
+                                "वर्णन (Description)": le.get("wikidata_description") or "—",
+                                "Wikipedia": le.get("wikipedia_url") or "—",
+                                "स्थिती (Status)": le["match_status"],
+                            })
+                        st.dataframe(pd.DataFrame(link_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("लिंकिंगसाठी कोणतेही घटक उपलब्ध नाहीत.")
+            else:
+                st.info("विकिडेटा लिंकिंगसाठी कोणतेही घटक उपलब्ध नाहीत.")
+
+        # ── Tab 7: Export ──
         with tab_export:
             if filtered:
                 export_data = []

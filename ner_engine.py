@@ -1181,3 +1181,237 @@ def render_annotated_html(text: str, entities: List[Dict[str, Any]], show_canoni
 
     full_content = "".join(html_parts).replace("\n", "<br/>")
     return f'<div style="{wrapper_style}">{full_content}</div>'
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Feature: Entity Frequency Analysis ──────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_entity_frequency(entities: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Compute frequency statistics for extracted entities grouped by canonical base form.
+    Returns frequency counts, category breakdown, top entities, and unique count.
+    """
+    from collections import Counter
+
+    canonical_counts: Counter = Counter()
+    entity_details: Dict[str, Dict] = {}
+
+    for e in entities:
+        canonical = e.get("canonical_entity", e.get("surface", ""))
+        tag = e.get("tag", "MISC")
+        category = e.get("category", "")
+        surface = e.get("surface", e.get("entity", ""))
+
+        canonical_counts[canonical] += 1
+
+        if canonical not in entity_details:
+            entity_details[canonical] = {
+                "tag": tag,
+                "category": category,
+                "surfaces": set(),
+                "icon": e.get("icon", ""),
+            }
+        entity_details[canonical]["surfaces"].add(surface)
+
+    freq_table = []
+    for canonical, count in canonical_counts.most_common():
+        detail = entity_details[canonical]
+        freq_table.append({
+            "canonical_entity": canonical,
+            "count": count,
+            "tag": detail["tag"],
+            "category": detail["category"],
+            "surface_forms": sorted(detail["surfaces"]),
+            "icon": detail["icon"],
+        })
+
+    category_counts: Dict[str, int] = {}
+    for e in entities:
+        t = e.get("tag", "MISC")
+        category_counts[t] = category_counts.get(t, 0) + 1
+
+    return {
+        "freq_table": freq_table,
+        "category_counts": category_counts,
+        "total_entities": len(entities),
+        "unique_entities": len(canonical_counts),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Feature: Entity Co-occurrence Network ───────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_cooccurrence(text: str, entities: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Compute sentence-level entity co-occurrence.
+    Two entities co-occur when they appear in the same sentence.
+    Returns nodes, weighted edges, and an adjacency matrix for visualization.
+    """
+    from collections import Counter, defaultdict
+
+    # Split into sentences on Marathi / standard punctuation
+    sentences = re.split(r'[।\.\!\?]+', text)
+    sentence_boundaries: List[Tuple[int, int]] = []
+    offset = 0
+    for sent in sentences:
+        start = text.find(sent, offset)
+        if start == -1:
+            start = offset
+        end = start + len(sent)
+        sentence_boundaries.append((start, end))
+        offset = end
+
+    # Map entities → sentences
+    sentence_entities: Dict[int, set] = defaultdict(set)
+    entity_tag_map: Dict[str, str] = {}
+
+    for e in entities:
+        e_start = e.get("start", 0)
+        e_end = e.get("end", 0)
+        canonical = e.get("canonical_entity", e.get("surface", ""))
+        tag = e.get("tag", "MISC")
+        entity_key = canonical
+        entity_tag_map[entity_key] = tag
+
+        for s_idx, (s_start, s_end) in enumerate(sentence_boundaries):
+            if e_start >= s_start and e_end <= s_end:
+                sentence_entities[s_idx].add(entity_key)
+                break
+
+    # Count co-occurrences
+    cooccurrence: Counter = Counter()
+    all_entities: set = set()
+    for _s_idx, ent_keys in sentence_entities.items():
+        ent_list = sorted(ent_keys)
+        all_entities.update(ent_list)
+        for i in range(len(ent_list)):
+            for j in range(i + 1, len(ent_list)):
+                cooccurrence[(ent_list[i], ent_list[j])] += 1
+
+    nodes = sorted(all_entities)
+    edges = [
+        {"source": src, "target": tgt, "weight": w}
+        for (src, tgt), w in cooccurrence.most_common()
+    ]
+
+    # Adjacency matrix
+    node_index = {n: i for i, n in enumerate(nodes)}
+    size = len(nodes)
+    matrix = [[0] * size for _ in range(size)]
+    for (src, tgt), w in cooccurrence.items():
+        i, j = node_index[src], node_index[tgt]
+        matrix[i][j] = w
+        matrix[j][i] = w
+
+    return {
+        "nodes": nodes,
+        "node_tags": {n: entity_tag_map.get(n, "MISC") for n in nodes},
+        "edges": edges,
+        "matrix": matrix,
+        "sentence_count": len(sentences),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Feature: Wikidata Entity Linking ────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def lookup_wikidata_entities(
+    entities: List[Dict[str, Any]], language: str = "mr"
+) -> List[Dict[str, Any]]:
+    """
+    Link canonical entities to Wikidata entries via the wbsearchentities API.
+    Returns enriched records with QID, description, and Wikipedia URL.
+    Deduplicates by (canonical_entity, tag) before querying.
+    """
+    import requests as _req
+
+    WIKIDATA_API = "https://www.wikidata.org/w/api.php"
+    results: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    for e in entities:
+        canonical = e.get("canonical_entity", e.get("surface", ""))
+        tag = e.get("tag", "MISC")
+
+        key = (canonical, tag)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        linked: Dict[str, Any] = {
+            "canonical_entity": canonical,
+            "tag": tag,
+            "category": e.get("category", ""),
+            "icon": e.get("icon", ""),
+            "surface": e.get("surface", ""),
+            "wikidata_id": None,
+            "wikidata_label": None,
+            "wikidata_description": None,
+            "wikipedia_url": None,
+            "wikidata_url": None,
+            "match_status": "❌ Not Found",
+        }
+
+        try:
+            for lang in [language, "en"]:
+                params = {
+                    "action": "wbsearchentities",
+                    "search": canonical,
+                    "language": lang,
+                    "limit": 3,
+                    "format": "json",
+                }
+                resp = _req.get(WIKIDATA_API, params=params, timeout=5)
+                if resp.status_code != 200:
+                    continue
+
+                search_hits = resp.json().get("search", [])
+                if not search_hits:
+                    continue
+
+                best = search_hits[0]
+                qid = best.get("id", "")
+                linked["wikidata_id"] = qid
+                linked["wikidata_label"] = best.get("label", "")
+                linked["wikidata_description"] = best.get("description", "")
+                linked["wikidata_url"] = f"https://www.wikidata.org/wiki/{qid}"
+
+                # Resolve Wikipedia sitelink
+                if qid:
+                    wiki_params = {
+                        "action": "wbgetentities",
+                        "ids": qid,
+                        "props": "sitelinks",
+                        "sitefilter": f"{language}wiki|enwiki",
+                        "format": "json",
+                    }
+                    wiki_resp = _req.get(WIKIDATA_API, params=wiki_params, timeout=5)
+                    if wiki_resp.status_code == 200:
+                        ent_data = (
+                            wiki_resp.json()
+                            .get("entities", {})
+                            .get(qid, {})
+                        )
+                        sitelinks = ent_data.get("sitelinks", {})
+                        for wiki_key in [f"{language}wiki", "enwiki"]:
+                            if wiki_key in sitelinks:
+                                title = sitelinks[wiki_key]["title"]
+                                wiki_lang = wiki_key.replace("wiki", "")
+                                linked["wikipedia_url"] = (
+                                    f"https://{wiki_lang}.wikipedia.org/wiki/"
+                                    f"{title.replace(' ', '_')}"
+                                )
+                                break
+
+                linked["match_status"] = f"✅ Linked ({lang})"
+                break  # Found — stop language fallback loop
+
+        except Exception as ex:
+            linked["match_status"] = f"⚠️ Error: {str(ex)[:60]}"
+
+        results.append(linked)
+
+    return results
