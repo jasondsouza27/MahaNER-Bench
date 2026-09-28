@@ -231,6 +231,13 @@ KNOWN_BASE_ENTITIES = {
     "ईव्ही प्रकल्प", "ईव्ही", "आंतरराष्ट्रीय क्रिकेट सामना", "क्रिकेट सामना", "सामना"
 }
 
+# Honorific titles and designations that can prefix a Person entity
+PERSON_TITLE_PREFIXES = {
+    "मुख्यमंत्री", "पंतप्रधान", "उपमुख्यमंत्री", "गृहमंत्री", "अर्थमंत्री", "मंत्री",
+    "खासदार", "आमदार", "राज्यपाल", "राष्ट्रपती", "सरन्यायाधीश", "न्यायाधीश",
+    "डॉ.", "डॉ", "श्री", "श्रीमती", "पंडित"
+}
+
 # High-precision canonical mapping table for frequent inflected forms
 KNOWN_CANONICAL_MAP: Dict[str, Tuple[str, str, str]] = {
     # LOC - Maharashtra Cities & Forts
@@ -480,8 +487,9 @@ def stem_marathi_word(word: str, tag: Optional[str] = None) -> Tuple[str, Option
         if word.endswith(suff) and len(word) > len(suff):
             stem = word[:-len(suff)]
 
-            # Guard: Dative 'स' only attaches to vowel/anusvara-ending oblique stems
-            if suff == "स" and not (stem.endswith(("ा", "े", "ी", "ू", "ं"))):
+            # Guard: Dative 'स' in Marathi only attaches to oblique stems ending in 'ा' or 'ां' (e.g. रामा-स, लोकां-स)
+            # Never strip 'स' from proper nouns ending in consonant/vowel like फडणवीस, पारस, विकास
+            if suff == "स" and not (stem.endswith(("ा", "ां"))):
                 continue
 
             # Guard against invalid stems
@@ -611,14 +619,22 @@ def canonicalize_marathi_entity(surface: str, tag: Optional[str] = None) -> Tupl
     # 3. Multi-word entity handling: inflection attaches to the head noun (last word)
     words = cleaned.split()
     if len(words) > 1:
-        prefix = " ".join(words[:-1])
-        last_word = words[-1]
+        # Check if leading word is an honorific/designation title prefix
+        title_stripped_words = words
+        if words[0] in PERSON_TITLE_PREFIXES and len(words) > 1:
+            title_stripped_words = words[1:]
+
+        prefix = " ".join(title_stripped_words[:-1])
+        last_word = title_stripped_words[-1]
 
         # Check if last word is inflected
         last_base, suff, case_lbl = stem_marathi_word(last_word, tag)
         if suff:
             canonical = f"{prefix} {last_base}".strip()
             return canonical, suff, case_lbl
+        else:
+            canonical = " ".join(title_stripped_words).strip()
+            return canonical, "", "प्रथमा (Nominative / Base)"
 
     # 4. Single-word entity stemming
     base, suff, case_lbl = stem_marathi_word(cleaned, tag)
@@ -664,6 +680,18 @@ def aggregate_subwords_and_bio(
                 end = pos + len(clean_word)
             else:
                 continue
+
+        # Subword boundary repair: if chunk starts with '##' or a dependent vowel sign/virama/anusvara,
+        # it is an attached suffix of the previous word. Advance start past that trailing syllable to the next full word.
+        dev_dep_signs = set(chr(cp) for cp in range(0x093E, 0x0950)) | {'\u0902', '\u0903'}
+        if word.startswith("##") or (start < len(original_text) and original_text[start] in dev_dep_signs):
+            while start < end and not original_text[start].isspace():
+                start += 1
+            while start < end and original_text[start].isspace():
+                start += 1
+
+        if start >= end:
+            continue
 
         valid_chunks.append({
             "tag": norm_tag,
@@ -727,6 +755,14 @@ def aggregate_subwords_and_bio(
 
             if is_suffix:
                 e = word_end
+
+        # Prevent overlapping spans with previously committed entity
+        if entities and s < entities[-1]["end"]:
+            s = entities[-1]["end"]
+            while s < e and original_text[s].isspace():
+                s += 1
+            if s >= e:
+                continue
 
         surface = original_text[s:e].strip()
         if not surface:
@@ -1318,18 +1354,20 @@ def compute_cooccurrence(text: str, entities: List[Dict[str, Any]]) -> Dict[str,
 # ─── Feature: Wikidata Entity Linking ────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_WIKIDATA_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
 def lookup_wikidata_entities(
     entities: List[Dict[str, Any]], language: str = "mr"
 ) -> List[Dict[str, Any]]:
     """
-    Link canonical entities to Wikidata entries via the wbsearchentities API.
-    Returns enriched records with QID, description, and Wikipedia URL.
-    Deduplicates by (canonical_entity, tag) before querying.
+    Link canonical entities to Marathi Wikipedia articles and Wikidata entries.
+    Uses Marathi Wikipedia query (with redirects & page extracts) -> Marathi Wikipedia opensearch
+    -> Wikidata wbsearchentities with mr and en fallback.
+    Deduplicates and caches results in memory.
     """
     import requests as _req
 
-    WIKIDATA_API = "https://www.wikidata.org/w/api.php"
-    # Wikimedia requires a descriptive User-Agent — bare requests get 403.
     _HEADERS = {
         "User-Agent": "MahaNER/1.0 (Marathi NER Research Project; https://github.com/jasondsouza27/MahaNER-Bench)"
     }
@@ -1340,20 +1378,33 @@ def lookup_wikidata_entities(
     seen: set = set()
 
     for e in entities:
-        canonical = e.get("canonical_entity", e.get("surface", ""))
+        canonical = e.get("canonical_entity", e.get("surface", "")).strip()
         tag = e.get("tag", "MISC")
+        surface = e.get("surface", "").strip()
+
+        if not canonical:
+            continue
 
         key = (canonical, tag)
         if key in seen:
             continue
         seen.add(key)
 
+        cache_key = f"{canonical}:{tag}"
+        if cache_key in _WIKIDATA_CACHE:
+            cached_item = dict(_WIKIDATA_CACHE[cache_key])
+            cached_item["category"] = e.get("category", "")
+            cached_item["icon"] = e.get("icon", "")
+            cached_item["surface"] = surface
+            results.append(cached_item)
+            continue
+
         linked: Dict[str, Any] = {
             "canonical_entity": canonical,
             "tag": tag,
             "category": e.get("category", ""),
             "icon": e.get("icon", ""),
-            "surface": e.get("surface", ""),
+            "surface": surface,
             "wikidata_id": None,
             "wikidata_label": None,
             "wikidata_description": None,
@@ -1362,63 +1413,163 @@ def lookup_wikidata_entities(
             "match_status": "❌ Not Found",
         }
 
-        try:
-            for lang in [language, "en"]:
-                params = {
-                    "action": "wbsearchentities",
-                    "search": canonical,
-                    "language": lang,
-                    "limit": 3,
-                    "format": "json",
-                }
-                resp = session.get(WIKIDATA_API, params=params, timeout=8)
-                if resp.status_code != 200:
-                    continue
+        # Candidate search terms (e.g. canonical, and if multi-word without honorifics)
+        search_candidates = [canonical]
+        words = canonical.split()
+        if len(words) > 1 and words[0] in PERSON_TITLE_PREFIXES:
+            search_candidates.append(" ".join(words[1:]))
 
-                search_hits = resp.json().get("search", [])
-                if not search_hits:
-                    continue
+        found = False
 
-                best = search_hits[0]
-                qid = best.get("id", "")
-                linked["wikidata_id"] = qid
-                linked["wikidata_label"] = best.get("label", "")
-                linked["wikidata_description"] = best.get("description", "")
-                linked["wikidata_url"] = f"https://www.wikidata.org/wiki/{qid}"
+        for cand in search_candidates:
+            if found:
+                break
 
-                # Resolve Wikipedia sitelink
-                if qid:
-                    wiki_params = {
-                        "action": "wbgetentities",
-                        "ids": qid,
-                        "props": "sitelinks",
-                        "sitefilter": f"{language}wiki|enwiki",
-                        "format": "json",
-                    }
-                    wiki_resp = session.get(WIKIDATA_API, params=wiki_params, timeout=8)
-                    if wiki_resp.status_code == 200:
-                        ent_data = (
-                            wiki_resp.json()
-                            .get("entities", {})
-                            .get(qid, {})
+            # 1. Try mr.wikipedia directly with redirects & extracts
+            try:
+                r = session.get(
+                    "https://mr.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "prop": "pageprops|extracts",
+                        "exintro": 1,
+                        "explaintext": 1,
+                        "titles": cand,
+                        "redirects": 1,
+                        "format": "json"
+                    },
+                    timeout=8
+                )
+                if r.status_code == 200:
+                    pages = r.json().get("query", {}).get("pages", {})
+                    for pid, p in pages.items():
+                        if pid != "-1":
+                            qid = p.get("pageprops", {}).get("wikibase_item")
+                            title = p.get("title", cand)
+                            extract = p.get("extract", "").strip().split("\n")[0]
+                            if len(extract) > 140:
+                                extract = extract[:140] + "…"
+                            t_clean = title.replace(" ", "_")
+                            linked["wikidata_id"] = qid
+                            linked["wikidata_label"] = title
+                            linked["wikidata_description"] = extract if extract else f"मराठी विकिपीडिया लेख: {title}"
+                            linked["wikipedia_url"] = f"https://mr.wikipedia.org/wiki/{t_clean}"
+                            linked["wikidata_url"] = f"https://www.wikidata.org/wiki/{qid}" if qid else None
+                            linked["match_status"] = "✅ Linked (mr.wiki)"
+                            found = True
+                            break
+            except Exception as ex:
+                logger.debug("mr.wikipedia query error: %s", ex)
+
+            if found:
+                break
+
+            # 2. Try opensearch on mr.wikipedia (fuzzy / prefix matches)
+            try:
+                r = session.get(
+                    "https://mr.wikipedia.org/w/api.php",
+                    params={
+                        "action": "opensearch",
+                        "search": cand,
+                        "limit": 2,
+                        "format": "json"
+                    },
+                    timeout=8
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if len(data) > 1 and data[1]:
+                        first_title = data[1][0]
+                        r2 = session.get(
+                            "https://mr.wikipedia.org/w/api.php",
+                            params={
+                                "action": "query",
+                                "prop": "pageprops|extracts",
+                                "exintro": 1,
+                                "explaintext": 1,
+                                "titles": first_title,
+                                "redirects": 1,
+                                "format": "json"
+                            },
+                            timeout=8
                         )
-                        sitelinks = ent_data.get("sitelinks", {})
-                        for wiki_key in [f"{language}wiki", "enwiki"]:
-                            if wiki_key in sitelinks:
-                                title = sitelinks[wiki_key]["title"]
-                                wiki_lang = wiki_key.replace("wiki", "")
-                                linked["wikipedia_url"] = (
-                                    f"https://{wiki_lang}.wikipedia.org/wiki/"
-                                    f"{title.replace(' ', '_')}"
+                        if r2.status_code == 200:
+                            for pid, p in r2.json().get("query", {}).get("pages", {}).items():
+                                if pid != "-1":
+                                    qid = p.get("pageprops", {}).get("wikibase_item")
+                                    extract = p.get("extract", "").strip().split("\n")[0]
+                                    if len(extract) > 140:
+                                        extract = extract[:140] + "…"
+                                    t_clean = first_title.replace(" ", "_")
+                                    linked["wikidata_id"] = qid
+                                    linked["wikidata_label"] = first_title
+                                    linked["wikidata_description"] = extract if extract else f"मराठी विकिपीडिया लेख: {first_title}"
+                                    linked["wikipedia_url"] = f"https://mr.wikipedia.org/wiki/{t_clean}"
+                                    linked["wikidata_url"] = f"https://www.wikidata.org/wiki/{qid}" if qid else None
+                                    linked["match_status"] = "✅ Linked (mr.wiki)"
+                                    found = True
+                                    break
+            except Exception as ex:
+                logger.debug("mr.wikipedia opensearch error: %s", ex)
+
+            if found:
+                break
+
+            # 3. Fallback to Wikidata wbsearchentities
+            for lang in ["mr", "en"]:
+                try:
+                    r = session.get(
+                        "https://www.wikidata.org/w/api.php",
+                        params={
+                            "action": "wbsearchentities",
+                            "search": cand,
+                            "language": lang,
+                            "limit": 3,
+                            "format": "json"
+                        },
+                        timeout=8
+                    )
+                    if r.status_code == 200:
+                        hits = r.json().get("search", [])
+                        if hits:
+                            best = hits[0]
+                            qid = best.get("id")
+                            linked["wikidata_id"] = qid
+                            linked["wikidata_label"] = best.get("label", cand)
+                            linked["wikidata_description"] = best.get("description", "")
+                            linked["wikidata_url"] = f"https://www.wikidata.org/wiki/{qid}"
+                            linked["match_status"] = f"✅ Linked (wikidata-{lang})"
+
+                            # Resolve sitelink
+                            try:
+                                wr = session.get(
+                                    "https://www.wikidata.org/w/api.php",
+                                    params={
+                                        "action": "wbgetentities",
+                                        "ids": qid,
+                                        "props": "sitelinks",
+                                        "sitefilter": "mrwiki|enwiki",
+                                        "format": "json"
+                                    },
+                                    timeout=8
                                 )
-                                break
+                                if wr.status_code == 200:
+                                    slinks = wr.json().get("entities", {}).get(qid, {}).get("sitelinks", {})
+                                    for wk in ["mrwiki", "enwiki"]:
+                                        if wk in slinks:
+                                            wl = wk.replace("wiki", "")
+                                            wt = slinks[wk]["title"].replace(" ", "_")
+                                            linked["wikipedia_url"] = f"https://{wl}.wikipedia.org/wiki/{wt}"
+                                            break
+                            except Exception:
+                                pass
 
-                linked["match_status"] = f"✅ Linked ({lang})"
-                break  # Found — stop language fallback loop
+                            found = True
+                            break
+                except Exception as ex:
+                    logger.debug("wikidata error: %s", ex)
 
-        except Exception as ex:
-            linked["match_status"] = f"⚠️ Error: {str(ex)[:60]}"
-
+        _WIKIDATA_CACHE[cache_key] = dict(linked)
         results.append(linked)
 
     session.close()
