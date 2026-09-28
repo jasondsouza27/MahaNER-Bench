@@ -1329,6 +1329,13 @@ def lookup_wikidata_entities(
     import requests as _req
 
     WIKIDATA_API = "https://www.wikidata.org/w/api.php"
+    # Wikimedia requires a descriptive User-Agent — bare requests get 403.
+    _HEADERS = {
+        "User-Agent": "MahaNER/1.0 (Marathi NER Research Project; https://github.com/jasondsouza27/MahaNER-Bench)"
+    }
+    session = _req.Session()
+    session.headers.update(_HEADERS)
+
     results: List[Dict[str, Any]] = []
     seen: set = set()
 
@@ -1364,7 +1371,7 @@ def lookup_wikidata_entities(
                     "limit": 3,
                     "format": "json",
                 }
-                resp = _req.get(WIKIDATA_API, params=params, timeout=5)
+                resp = session.get(WIKIDATA_API, params=params, timeout=8)
                 if resp.status_code != 200:
                     continue
 
@@ -1388,7 +1395,7 @@ def lookup_wikidata_entities(
                         "sitefilter": f"{language}wiki|enwiki",
                         "format": "json",
                     }
-                    wiki_resp = _req.get(WIKIDATA_API, params=wiki_params, timeout=5)
+                    wiki_resp = session.get(WIKIDATA_API, params=wiki_params, timeout=8)
                     if wiki_resp.status_code == 200:
                         ent_data = (
                             wiki_resp.json()
@@ -1414,4 +1421,5 @@ def lookup_wikidata_entities(
 
         results.append(linked)
 
+    session.close()
     return results
